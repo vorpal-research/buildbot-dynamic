@@ -1,6 +1,6 @@
 import json
 from os.path import isfile
-from typing import Any, Dict, AnyStr
+from typing import Any, Dict, AnyStr, Callable
 
 from buildbot.config import error
 from buildbot.util.logger import Logger
@@ -103,6 +103,8 @@ class BuildbotDynamicService(BuildbotService):
         with open(self.project_list_storage, "wt") as f:
             json.dump(projects, f)
 
+        self.master.reconfig()
+
         return projects
 
     def get_projects(self) -> ProjectList:
@@ -118,3 +120,17 @@ class BuildbotDynamicService(BuildbotService):
 class DuplicateProjectException(Error):
     def __init__(self, *args: Any) -> None:
         super().__init__(http.BAD_REQUEST, *args)
+
+
+def load_dynamic_projects(project_list_file: AnyStr, cb: Callable[[AnyStr, AnyStr], None]):
+    with open(project_list_file, "rt") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            data = {}
+
+    for (name, datum) in data.items():
+        url = datum.get("url")
+        if url is None:
+            error("Project '%s' does not have a URL" % name)
+        cb(name, url)
