@@ -1,4 +1,6 @@
 import json
+from collections import namedtuple
+from hashlib import sha512
 from os.path import isfile
 from typing import Any, Dict, AnyStr, Callable
 
@@ -14,6 +16,12 @@ from twisted.web.http import Request
 
 ProjectList = Dict[AnyStr, Dict[AnyStr, Any]]
 
+Project = namedtuple("Project", ['name', 'url', 'type'])
+
+
+def name2sha512(name: AnyStr) -> AnyStr:
+    return sha512(name.encode()).hexdigest()[0:32]
+
 
 class BuildbotDynamicResourse(Resource):
     logger = Logger()
@@ -26,6 +34,8 @@ class BuildbotDynamicResourse(Resource):
     def reconfigResource(self, new_config):
         pass
 
+    # TODO: add self.master.www.assertUserAllowed(...)
+
     def render_GET(self, request: Request):
         def cb(_):
             data = self.parent_service.get_projects()
@@ -35,18 +45,18 @@ class BuildbotDynamicResourse(Resource):
 
     def render_POST(self, request: Request):
         def cb(req):
-            project_name = req.args.get(b'project_name')
-            project_url = req.args.get(b'project_url')
+            param_names = Project._fields
 
-            if project_name is None or project_url is None:
+            params = [req.args.get(pname.encode()) for pname in param_names]
+
+            if any([param is None for param in params]):
                 raise Error(
                     http.BAD_REQUEST,
-                    ("Missing some of 'project_name', 'project_url': (%s, %s)" % (project_name, project_url)).encode()
+                    ("Missing some of %s: %s" % (param_names, params)).encode()
                 )
 
             data = self.parent_service.add_project(
-                project_name[0].decode(),
-                project_url[0].decode()
+                Project._make([param[0].decode() for param in params])
             )
             return defer.succeed(json.dumps(data).encode())
 
@@ -58,43 +68,53 @@ class BuildbotDynamicService(BuildbotService):
 
     name = "Buildbot Dynamic Service"
 
-    project_list_storage_key = "project_list_storage"
+    course_name_key = "course_name"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.course_name = None
+        self.course_name_sha512 = None
         self.project_list_storage = None
 
     def reconfigService(self, *args, **kwargs) -> Deferred:
+        self.course_name = kwargs[self.course_name_key]
+        self.course_name_sha512 = name2sha512(self.course_name)
+        self.project_list_storage = "%s.json" % self.course_name_sha512
+
         root = self.master.www.apps.get("base").resource
         root.putChild(
-            b'custom', BuildbotDynamicResourse(self.master, self)
+            self.course_name_sha512.encode(), BuildbotDynamicResourse(self.master, self)
         )
-
-        self.project_list_storage = kwargs[self.project_list_storage_key]
 
         return super().reconfigService(self.name, *args, **kwargs)
 
     def checkConfig(self, *args, **kwargs) -> None:
         super().checkConfig(BuildbotDynamicService.name, *args, **kwargs)
 
-        if self.project_list_storage_key not in kwargs:
-            error("No 'project_list_storage' set for BuildbotDynamicService")
+        if self.course_name_key not in kwargs:
+            error("No 'course_name' set for BuildbotDynamicService")
 
-        if not isfile(kwargs[self.project_list_storage_key]):
-            error("File '%s' does not exist" % kwargs[self.project_list_storage_key])
+        course_name = kwargs[self.course_name_key]
+        course_name_sha512 = name2sha512(course_name)
+        project_list_storage = "%s.json" % course_name_sha512
 
-    def add_project(self, project_name: AnyStr, project_url: AnyStr) -> ProjectList:
+        if not isfile(project_list_storage):
+            error("File '%s' does not exist" % project_list_storage)
+
+    def add_project(self, project: Project) -> ProjectList:
         projects = self.get_projects()
 
-        if project_name in projects:
+        if project.name in projects:
             raise DuplicateProjectException(
-                "Project '%s' already exists in: %s" % (project_name, projects)
+                "Project '%s' already exists in: %s" % (project.name, projects)
             )
 
         new_project = {
-            project_name: {
-                "url": project_url
+            project.name: {
+                "name": project.name,
+                "url": project.url,
+                "type": project.type
             }
         }
 
@@ -122,15 +142,17 @@ class DuplicateProjectException(Error):
         super().__init__(http.BAD_REQUEST, *args)
 
 
-def load_dynamic_projects(project_list_file: AnyStr, cb: Callable[[AnyStr, AnyStr], None]):
+def load_dynamic_projects(course_name: AnyStr, cb: Callable[[Project], None]):
+    course_name_sha512 = name2sha512(course_name)
+    project_list_file = "%s.json" % course_name_sha512
+
     with open(project_list_file, "rt") as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
             data = {}
 
-    for (name, datum) in data.items():
-        url = datum.get("url")
-        if url is None:
-            error("Project '%s' does not have a URL" % name)
-        cb(name, url)
+    for (name, project) in data.items():
+        if any([e is None for e in project]):
+            error("Project '%s' misses one of the required properties" % project)
+        cb(name, Project(**project))
