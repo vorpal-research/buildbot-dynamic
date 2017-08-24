@@ -1,4 +1,5 @@
 import json
+import re
 from collections import namedtuple
 from hashlib import sha512
 from os.path import isfile
@@ -156,3 +157,10 @@ def load_dynamic_projects(course_name: AnyStr, cb: Callable[[Project], None]):
         if any([e is None for e in project]):
             error("Project '%s' misses one of the required properties" % project)
         cb(name, Project(**project))
+
+
+def string2identifier(string: AnyStr) -> AnyStr:
+    cleaned = re.sub('\W|^(?=\d)', '_', string)
+    cleaned += "_"
+    cleaned += name2sha512(string)[0:4]
+    return cleaned
