@@ -1,3 +1,5 @@
+import re
+
 from twisted.python.compat import networkString
 
 
@@ -32,3 +34,6 @@ def twisted_UnauthorizedResource_render(self, request):
     if request.method == b'HEAD':
         return b''
     return b'Unauthorized'
+
+
+correct_python_ident_re = re.compile(r"^[^\d\W]\w*$", re.UNICODE)
