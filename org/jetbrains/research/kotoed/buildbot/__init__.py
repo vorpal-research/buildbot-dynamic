@@ -7,4 +7,4 @@ from org.jetbrains.research.kotoed.buildbot.monkeys import twisted_UnauthorizedR
 UnauthorizedResource.render = twisted_UnauthorizedResource_render
 
 # Fix too strict identifiers
-identifiers.ident_re = correct_ident_re
+# identifiers.ident_re = correct_ident_re
