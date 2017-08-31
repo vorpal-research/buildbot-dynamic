@@ -36,4 +36,4 @@ def twisted_UnauthorizedResource_render(self, request):
     return b'Unauthorized'
 
 
-correct_python_ident_re = re.compile(r"^[^\d\W]\w*$", re.UNICODE)
+correct_ident_re = re.compile(r"^[^\d\W][\w-]*$", re.UNICODE)
